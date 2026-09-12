@@ -41,6 +41,8 @@ export interface AppState {
   config: AppConfig;
   meta: SheetMeta | null;
   /* lifecycle */
+  /** False until init() has read local storage. Nothing may act on `mode` before it. */
+  booted: boolean;
   loading: boolean;
   syncing: boolean;
   lastSyncAt: number | null;
@@ -111,6 +113,7 @@ export const useStore = create<AppState>((set, get) => ({
   transactions: [],
   config: DEFAULT_CONFIG,
   meta: null,
+  booted: false,
   loading: true,
   syncing: false,
   lastSyncAt: null,
@@ -128,6 +131,21 @@ export const useStore = create<AppState>((set, get) => ({
     const queue = readJSON<PendingOp[]>(KEYS.queue, []);
 
     if (mode === 'demo') {
+      // A cached ledger here is real work — a CSV someone loaded, or edits they
+      // made to the sample. Regenerating the sample over it would throw it away.
+      if (transactions.length) {
+        set({
+          mode: 'demo',
+          status: 'demo',
+          transactions: sortByDate(transactions),
+          config,
+          meta,
+          booted: true,
+          loading: false,
+          lastSyncAt: Date.now(),
+        });
+        return;
+      }
       const boot = demoBootstrap();
       set({
         mode: 'demo',
@@ -135,6 +153,7 @@ export const useStore = create<AppState>((set, get) => ({
         transactions: boot.transactions,
         config: { ...boot.config, settings: { ...boot.config.settings, ...config.settings, currency: config.settings?.currency ?? boot.config.settings.currency } },
         meta: boot.meta,
+        booted: true,
         loading: false,
         lastSyncAt: Date.now(),
       });
@@ -151,6 +170,7 @@ export const useStore = create<AppState>((set, get) => ({
         meta,
         queue,
         status: 'connecting',
+        booted: true,
         loading: transactions.length === 0,
       });
       void get().refresh({ quiet: transactions.length > 0 });
@@ -164,7 +184,7 @@ export const useStore = create<AppState>((set, get) => ({
       return;
     }
 
-    set({ mode: 'unset', status: 'disconnected', loading: false });
+    set({ mode: 'unset', status: 'disconnected', booted: true, loading: false });
   },
 
   async connect(conn) {
@@ -182,6 +202,7 @@ export const useStore = create<AppState>((set, get) => ({
         mode: 'sheet',
         connection: conn,
         status: 'online',
+        booted: true,
         transactions: sortByDate(boot.transactions),
         config: merged,
         meta: boot.meta,
@@ -213,6 +234,7 @@ export const useStore = create<AppState>((set, get) => ({
       mode: 'unset',
       connection: EMPTY_CONN,
       status: 'disconnected',
+      booted: true,
       transactions: [],
       config: DEFAULT_CONFIG,
       meta: null,
@@ -231,6 +253,7 @@ export const useStore = create<AppState>((set, get) => ({
       transactions: boot.transactions,
       config: boot.config,
       meta: boot.meta,
+      booted: true,
       loading: false,
       error: null,
       lastSyncAt: Date.now(),
@@ -261,6 +284,7 @@ export const useStore = create<AppState>((set, get) => ({
         revision: 0,
         lastSyncedAt: new Date().toISOString(),
       },
+      booted: true,
       loading: false,
       error: null,
       lastSyncAt: Date.now(),

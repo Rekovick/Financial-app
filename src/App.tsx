@@ -14,18 +14,18 @@ import { Goals } from '@/pages/Goals';
 import { Rules } from '@/pages/Rules';
 import { Settings } from '@/pages/Settings';
 import { Connect } from '@/pages/Connect';
-import { PREVIEW_ONLY } from '@/lib/api';
 import { useStore } from '@/lib/store';
 import { useAppLifecycle } from '@/hooks/useAppLifecycle';
 
 export default function App() {
   useAppLifecycle();
-  const { mode, loading } = useStore();
+  const { mode, loading, booted } = useStore();
   const { pathname } = useLocation();
 
-  // On a preview link the store boots straight into the sample ledger, but that
-  // happens in an effect — so don't bounce to setup in the frame before it runs.
-  if (mode === 'unset' && !PREVIEW_ONLY && pathname !== '/connect') {
+  // `init()` reads local storage in an effect, so `mode` is still 'unset' on the
+  // very first render. Redirecting on that would bounce a perfectly well
+  // connected app to the setup screen on every single load — wait for boot.
+  if (booted && mode === 'unset' && pathname !== '/connect') {
     return <Navigate to="/connect" replace />;
   }
 
@@ -40,7 +40,7 @@ export default function App() {
 
   return (
     <AppShell>
-      {loading ? (
+      {loading || !booted ? (
         <LoadingSkeleton />
       ) : (
         <Routes>
