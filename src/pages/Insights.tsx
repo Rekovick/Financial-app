@@ -75,6 +75,13 @@ export function Insights() {
     navigate('/transactions');
   };
 
+  // "Other" is a label byCategory invents for the folded tail, so drill through
+  // to the categories it actually stands for rather than to a name nothing has.
+  const drillToSlice = (name: string) => {
+    const slice = cats.find((c) => c.name === name);
+    drillTo({ categories: slice?.members ?? [name] });
+  };
+
   if (!transactions.length) {
     return (
       <Card>
@@ -140,7 +147,7 @@ export function Insights() {
               centerLabel={direction === 'expense' ? 'Spent' : 'Received'}
               centerValue={money(direction === 'expense' ? sums.expense : sums.income, s, { compact: true })}
               formatValue={fmt}
-              onSelect={(name) => drillTo({ categories: [name] })}
+              onSelect={drillToSlice}
             />
             <div className="mt-3">
               <RowBars
@@ -153,7 +160,7 @@ export function Insights() {
                 }))}
                 formatValue={fmt}
                 compact
-                onSelect={(name) => drillTo({ categories: [name] })}
+                onSelect={drillToSlice}
               />
             </div>
           </CardBody>

@@ -90,6 +90,15 @@ export function Dashboard() {
   );
 
   const showingCurrentPeriod = range.to >= todayISO();
+
+  // A slice may stand for several categories — "Other" is a label byCategory
+  // invents for the folded tail, and filtering on it would match nothing.
+  const drillToSlice = (name: string) => {
+    const slice = categories.find((c) => c.name === name);
+    clearFilter();
+    setFilter({ range, categories: slice?.members ?? [name] });
+    navigate('/transactions');
+  };
   const overBudget = budgets.filter((b) => b.state === 'over');
 
   const pctChange = (a: number, b: number) => (b === 0 ? null : (a - b) / Math.abs(b));
@@ -221,11 +230,7 @@ export function Dashboard() {
                     centerLabel="Total spent"
                     centerValue={money(cur.expense, s, { compact: true })}
                     formatValue={fmt}
-                    onSelect={(name) => {
-                      clearFilter();
-                      setFilter({ range, categories: [name] });
-                      navigate('/transactions');
-                    }}
+                    onSelect={drillToSlice}
                   />
                 </div>
                 {/* Direct labels double as the relief for light-mode contrast. */}
@@ -240,11 +245,7 @@ export function Dashboard() {
                     }))}
                     formatValue={fmt}
                     compact
-                    onSelect={(name) => {
-                      clearFilter();
-                      setFilter({ range, categories: [name] });
-                      navigate('/transactions');
-                    }}
+                    onSelect={drillToSlice}
                   />
                 </div>
               </div>

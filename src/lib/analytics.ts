@@ -112,6 +112,12 @@ export interface CategorySlice {
   /** Palette slot 1-8, or 0 for the neutral bucket. Charts order marks by this. */
   slot: number;
   share: number;
+  /**
+   * The real category names this slice stands for — itself, or every category
+   * folded into "Other". Filtering must use these: "Other" is a label this
+   * function invents, and no transaction carries it.
+   */
+  members: string[];
 }
 
 /**
@@ -149,6 +155,7 @@ export function byCategory(
       color: categoryColor(categories, name),
       slot: categorySlot(categories, name),
       share: total ? e.value / total : 0,
+      members: [name],
     }))
     .sort((a, b) => b.value - a.value);
 
@@ -163,6 +170,7 @@ export function byCategory(
     color: OTHER_COLOR,
     slot: 0,
     share: tail.reduce((s, r) => s + r.share, 0),
+    members: tail.map((r) => r.name),
   });
   return head;
 }

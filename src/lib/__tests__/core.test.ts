@@ -545,3 +545,31 @@ test('category guessing is not fooled by keywords hiding inside longer words', (
   assert.equal(icon('Gaming & Entertainment'), '🎮');
   assert.equal(icon('Retail & Shopping'), '🛍️');
 });
+
+test('the folded "Other" slice knows which categories it stands for', () => {
+  const rows = Array.from({ length: 12 }, (_, i) =>
+    txn({ amount: 100 - i, category: `Cat${String(i).padStart(2, '0')}` }),
+  );
+  const slices = byCategory(rows, DEFAULT_CATEGORIES, null, { limit: 5 });
+  const other = slices.find((s) => s.name === 'Other')!;
+
+  // Filtering on the literal label would match nothing — the members are what
+  // the drill-through actually uses.
+  assert.ok(!rows.some((t) => t.category === 'Other'));
+  assert.equal(other.members.length, 8, 'the 8 folded categories');
+  assert.equal(
+    applyFilter(rows, { ...EMPTY_FILTER, categories: other.members }).length,
+    8,
+    'clicking Other must find its transactions',
+  );
+
+  // A normal slice stands for exactly itself.
+  const top = slices[0];
+  assert.deepEqual(top.members, [top.name]);
+  assert.equal(applyFilter(rows, { ...EMPTY_FILTER, categories: top.members }).length, 1);
+
+  // And the folded rows account for exactly the Other total.
+  const foldedTotal = applyFilter(rows, { ...EMPTY_FILTER, categories: other.members })
+    .reduce((s, t) => s + t.amount, 0);
+  assert.equal(foldedTotal, other.value);
+});
