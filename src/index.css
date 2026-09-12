@@ -1,0 +1,217 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------ *
+ * Design tokens.  Light is the base; dark redefines only what changes,
+ * under both the OS media query and the explicit [data-theme] stamp so
+ * the in-app toggle wins in either direction.
+ * Chart series colours come from the validated categorical palette.
+ * ------------------------------------------------------------------ */
+:root {
+  color-scheme: light;
+
+  --plane: 247 247 245;
+  --surface: 255 255 255;
+  --raised: 252 252 251;
+  --line: 225 224 217;
+  --hairline: 236 235 230;
+  --ink: 11 11 11;
+  --ink-2: 82 81 78;
+  --muted: 137 135 129;
+  --accent: 42 120 214;
+  --accent-soft: 232 240 252;
+
+  --good: 12 163 12;
+  --warning: 250 178 25;
+  --serious: 236 131 90;
+  --critical: 208 59 59;
+
+  /* Money semantics: money in vs money out. Deliberately not the
+     categorical slots — they must never impersonate a series. */
+  --inflow: 0 99 0;
+  --outflow: 208 59 59;
+
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --s3: #1baf7a;
+  --s4: #eda100;
+  --s5: #e87ba4;
+  --s6: #008300;
+  --s7: #4a3aa7;
+  --s8: #e34948;
+
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --plane: 11 11 12;
+    --surface: 20 20 22;
+    --raised: 27 27 30;
+    --line: 44 44 42;
+    --hairline: 36 36 39;
+    --ink: 255 255 255;
+    --ink-2: 195 194 183;
+    --muted: 137 135 129;
+    --accent: 57 135 229;
+    --accent-soft: 24 39 60;
+
+    --inflow: 12 163 12;
+    --outflow: 230 103 103;
+
+    --s1: #3987e5;
+    --s2: #d95926;
+    --s3: #199e70;
+    --s4: #c98500;
+    --s5: #d55181;
+    --s6: #008300;
+    --s7: #9085e9;
+    --s8: #e66767;
+
+    --grid: #2c2c2a;
+    --axis: #383835;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --plane: 11 11 12;
+  --surface: 20 20 22;
+  --raised: 27 27 30;
+  --line: 44 44 42;
+  --hairline: 36 36 39;
+  --ink: 255 255 255;
+  --ink-2: 195 194 183;
+  --muted: 137 135 129;
+  --accent: 57 135 229;
+  --accent-soft: 24 39 60;
+
+  --inflow: 12 163 12;
+  --outflow: 230 103 103;
+
+  --s1: #3987e5;
+  --s2: #d95926;
+  --s3: #199e70;
+  --s4: #c98500;
+  --s5: #d55181;
+  --s6: #008300;
+  --s7: #9085e9;
+  --s8: #e66767;
+
+  --grid: #2c2c2a;
+  --axis: #383835;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-plane text-ink font-sans antialiased;
+    overscroll-behavior-y: none;
+  }
+  ::selection {
+    background: rgb(var(--accent) / 0.22);
+  }
+  /* Recessive, consistent focus ring everywhere. */
+  :focus-visible {
+    outline: 2px solid rgb(var(--accent));
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+  /* Numbers that stack vertically must align. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-hairline bg-surface shadow-card;
+  }
+  .field {
+    @apply w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-[15px]
+           text-ink placeholder:text-muted transition-colors
+           focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25;
+  }
+  .label {
+    @apply mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-surface
+           px-2.5 py-1 text-[13px] font-medium text-ink-2 transition-colors;
+  }
+  .chip-on {
+    @apply border-accent/40 bg-accent-soft text-accent;
+  }
+  /* Rounds a container's corners WITHOUT making it a scroll container, so
+     `position: sticky` children still stick to the page. Use this instead of
+     `overflow-hidden` on anything that contains sticky day headers. */
+  .clip-round {
+    clip-path: inset(0 round 1rem);
+  }
+  .skel {
+    @apply relative overflow-hidden rounded-lg bg-hairline;
+  }
+  .skel::after {
+    content: '';
+    @apply absolute inset-0;
+    background: linear-gradient(90deg, transparent, rgb(var(--ink) / 0.05), transparent);
+    animation: shimmer 1.4s infinite;
+    transform: translateX(-100%);
+  }
+  @keyframes shimmer {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+  /* Blur amounts when "privacy mode" is on — useful on a phone in public. */
+  .private .redact {
+    filter: blur(7px);
+    user-select: none;
+    pointer-events: none;
+  }
+}
+
+/* Thin, unobtrusive scrollbars on desktop. */
+@media (pointer: fine) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--line)) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: rgb(var(--line));
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,53 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    # Requires Pages to be enabled once by hand — see the configure step below.
+    # Pages on a *private* repo also needs a paid plan; on a free account the
+    # repo has to be public, which is safe here: the app ships no data of yours,
+    # and the Sheet URL and access code live only in each browser's storage.
+    branches: [main, 'claude/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish rather than cancelling it mid-publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          # Project pages are served from /<repo>/, so the asset paths need it.
+          VITE_BASE: /${{ github.event.repository.name }}/
+      # Pages has to be switched on by a person first: Settings → Pages →
+      # Source: GitHub Actions. The workflow token is not allowed to create a
+      # Pages site (`enablement: true` fails with "Resource not accessible by
+      # integration"), so this step only configures a site that already exists.
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
