@@ -494,6 +494,44 @@ test('Spark export: delete removes the right row', () => {
   assert.ok(after.some((t) => t.description === 'Telda Wallet'), 'neighbours must survive');
 });
 
+test('a delete that cannot find its rows says so instead of claiming success', () => {
+  const { book } = sparkWorkbook();
+  const app = load(book);
+  post(app, 'prepareSheet', { sheetName: 'Transactions' });
+  const rows = post(app, 'bootstrap', {}).data.transactions;
+
+  // A stale id — the row was already removed elsewhere. Silence here is what
+  // makes a row "come back" at the next sync with no explanation.
+  const res = post(app, 'delete', { ids: ['sh_doesnotexist'] });
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.data.deleted, []);
+  assert.deepEqual(res.data.missing, ['sh_doesnotexist']);
+  assert.equal(post(app, 'bootstrap', {}).data.transactions.length, rows.length);
+
+  // A mixed batch reports precisely which half failed.
+  const real = rows[0].id;
+  const mixed = post(app, 'delete', { ids: [real, 'sh_alsomissing'] }).data;
+  assert.deepEqual(mixed.deleted, [real]);
+  assert.deepEqual(mixed.missing, ['sh_alsomissing']);
+  assert.equal(post(app, 'bootstrap', {}).data.transactions.length, rows.length - 1);
+});
+
+test('deleting from a sheet with no id column adds one rather than failing', () => {
+  const sheet = new FakeSheet('Ledger', [
+    ['Date', 'Details', 'Amount'],
+    ['2026-09-02', 'COFFEE', 40],
+    ['2026-09-03', 'LUNCH', 90],
+  ]);
+  const app = load(new FakeSpreadsheet('Bank', [sheet]));
+  const rows = post(app, 'bootstrap', {}).data.transactions;
+  const victim = rows.find((t) => t.description === 'COFFEE');
+
+  const res = post(app, 'delete', { ids: [victim.id] });
+  assert.equal(res.ok, true, res.error);
+  const after = post(app, 'bootstrap', {}).data.transactions;
+  assert.ok(after.some((t) => t.description === 'LUNCH'), 'the other row survives');
+});
+
 test('a sheet with no usable tab fails with a clear message', () => {
   const app = load(new FakeSpreadsheet('Empty', [new FakeSheet('Readme', [['just some notes']])]));
   const res = post(app, 'bootstrap', {});

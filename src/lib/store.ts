@@ -86,6 +86,30 @@ function mergeTransactions(local: Transaction[], incoming: Transaction[]): Trans
   return sortByDate([...map.values()]);
 }
 
+/**
+ * Replays not-yet-sent local changes on top of rows just fetched from the sheet.
+ *
+ * A fetch takes a second or two, and an edit or delete made during it would
+ * otherwise be wiped by the response — which arrives describing the sheet as it
+ * was *before* the change. The row reappears on screen, the queued write lands
+ * a moment later, and it vanishes again on the next sync. The queue is the
+ * record of what this device means to be true, so it wins until the server has
+ * confirmed it.
+ */
+export function replayQueue(incoming: Transaction[], queue: PendingOp[]): Transaction[] {
+  if (!queue.length) return incoming;
+
+  const byId = new Map(incoming.map((t) => [t.id, t]));
+  for (const op of queue) {
+    if (op.kind === 'upsert') {
+      for (const txn of op.transactions) byId.set(txn.id, txn);
+    } else if (op.kind === 'delete') {
+      for (const id of op.ids) byId.delete(id);
+    }
+  }
+  return [...byId.values()];
+}
+
 /** Has anyone actually configured this sheet, or is this a first connection? */
 function hasSavedConfig(config: Partial<AppConfig> | undefined): boolean {
   return !!config && Array.isArray(config.categories) && config.categories.length > 0;
@@ -349,8 +373,11 @@ export const useStore = create<AppState>((set, get) => ({
         ? mergeConfig(boot.config)
         : configFromSheet(DEFAULT_CONFIG, boot.transactions, boot.meta?.detectedCurrency);
 
+      // Anything queued *while* this fetch was in flight must survive it.
+      const rows = replayQueue(boot.transactions, get().queue);
+
       set({
-        transactions: sortByDate(boot.transactions),
+        transactions: sortByDate(rows),
         config: merged,
         meta: boot.meta,
         status: 'online',
@@ -364,7 +391,7 @@ export const useStore = create<AppState>((set, get) => ({
       // A new category can show up at any time — the automation invents one, or
       // someone types it into the sheet. Adopt it, but only write when there is
       // genuinely something new, so an idle poll stays read-only.
-      const added = newCategories(merged, boot.transactions);
+      const added = newCategories(merged, rows);
       if (added.length) {
         await get().updateConfig({ categories: [...merged.categories, ...added] }, { silent: true });
       }
@@ -498,9 +525,26 @@ export const useStore = create<AppState>((set, get) => ({
     while (remaining.length) {
       const op = remaining[0];
       try {
-        if (op.kind === 'upsert') await api.upsert(connection, op.transactions);
-        else if (op.kind === 'delete') await api.remove(connection, op.ids);
-        else await api.saveConfig(connection, op.config);
+        if (op.kind === 'upsert') {
+          await api.upsert(connection, op.transactions);
+        } else if (op.kind === 'delete') {
+          const res = await api.remove(connection, op.ids);
+          // The sheet accepted the request but couldn't find these rows, so
+          // they will come back on the next sync. Say so now, while the person
+          // still remembers deleting them.
+          if (res.missing?.length) {
+            get().toast({
+              message:
+                res.missing.length === op.ids.length
+                  ? 'Those rows were not found in the Sheet, so they will reappear. Try a full sync, then delete again.'
+                  : `${res.missing.length} of ${op.ids.length} rows were not found in the Sheet and will reappear.`,
+              tone: 'error',
+              duration: 9000,
+            });
+          }
+        } else {
+          await api.saveConfig(connection, op.config);
+        }
         remaining.shift();
         set({ queue: [...remaining] });
         writeJSON(KEYS.queue, remaining);

@@ -42,6 +42,7 @@ import { applyRules, previewRule, ruleFromTransaction } from '../rules.ts';
 import { parseCSV, toCSV, guessMapping, rowsToTransactions, findDuplicates } from '../csv.ts';
 import { DEFAULT_CATEGORIES, DEFAULT_CONFIG, DEFAULT_SETTINGS } from '../defaults.ts';
 import { configFromSheet, newCategories } from '../adopt.ts';
+import { replayQueue } from '../store.ts';
 import type { Transaction } from '../types.ts';
 
 const S = { ...DEFAULT_SETTINGS };
@@ -572,4 +573,41 @@ test('the folded "Other" slice knows which categories it stands for', () => {
   const foldedTotal = applyFilter(rows, { ...EMPTY_FILTER, categories: other.members })
     .reduce((s, t) => s + t.amount, 0);
   assert.equal(foldedTotal, other.value);
+});
+
+test('a sync in flight cannot undo an edit or delete made during it', () => {
+  // What the sheet returns — it describes the world before the local change.
+  const fromSheet = [
+    txn({ id: 'a', description: 'Talabat', amount: 138 }),
+    txn({ id: 'b', description: 'Telda', amount: 1313 }),
+    txn({ id: 'c', description: 'Etisalat', amount: 78.57 }),
+  ];
+
+  // Deleted while the fetch was in flight: it must not come back.
+  const afterDelete = replayQueue(fromSheet, [
+    { id: 'op1', at: 1, kind: 'delete', ids: ['b'] },
+  ]);
+  assert.deepEqual(afterDelete.map((t) => t.id).sort(), ['a', 'c']);
+
+  // Edited while the fetch was in flight: the local version must survive.
+  const edited = { ...fromSheet[0], category: 'Groceries', amount: 200 };
+  const afterEdit = replayQueue(fromSheet, [
+    { id: 'op2', at: 2, kind: 'upsert', transactions: [edited] },
+  ]);
+  assert.equal(afterEdit.find((t) => t.id === 'a')!.category, 'Groceries');
+  assert.equal(afterEdit.find((t) => t.id === 'a')!.amount, 200);
+
+  // A row added locally and not yet written is kept, not dropped.
+  const added = txn({ id: 'new', description: 'Cash lunch' });
+  assert.equal(replayQueue(fromSheet, [{ id: 'op3', at: 3, kind: 'upsert', transactions: [added] }]).length, 4);
+
+  // Later ops win over earlier ones, and a delete after an edit still deletes.
+  const both = replayQueue(fromSheet, [
+    { id: 'op4', at: 4, kind: 'upsert', transactions: [edited] },
+    { id: 'op5', at: 5, kind: 'delete', ids: ['a'] },
+  ]);
+  assert.ok(!both.some((t) => t.id === 'a'));
+
+  // Nothing queued: the sheet is the truth, untouched.
+  assert.equal(replayQueue(fromSheet, []), fromSheet);
 });

@@ -28,6 +28,10 @@ try {
     target: 'node20',
     sourcemap: 'inline',
     external: ['node:*'],
+    // The app's sources read Vite's `import.meta.env`, which only exists when
+    // Vite builds them. Stand in an empty object so importing a module that
+    // touches it doesn't blow up the whole test file.
+    define: { 'import.meta.env': '{}' },
     logLevel: 'warning',
   });
 

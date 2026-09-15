@@ -115,7 +115,7 @@ export const api = {
     return call(conn, 'upsert', { transactions });
   },
 
-  remove(conn: Connection, ids: string[]): Promise<{ revision: number; deleted: string[] }> {
+  remove(conn: Connection, ids: string[]): Promise<{ revision: number; deleted: string[]; missing?: string[] }> {
     return call(conn, 'delete', { ids });
   },
 

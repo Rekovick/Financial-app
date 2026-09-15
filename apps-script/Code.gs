@@ -841,7 +841,18 @@ function deleteTransactions(ids) {
     var headers = state.headers;
     var firstDataRow = state.firstDataRow;
     var idCol = headerIndex(headers, 'Ledgerly ID');
-    if (idCol < 0) throw new Error('This sheet has no Ledgerly ID column yet — run setup again.');
+
+    if (idCol < 0) {
+      // Same self-heal as upsert: add the id column and re-read, rather than
+      // refusing. Without this a delete fails and the row silently returns.
+      prepareSheet(sheet.getName());
+      state = getState();
+      sheet = state.sheet;
+      headers = state.headers;
+      firstDataRow = state.firstDataRow;
+      idCol = headerIndex(headers, 'Ledgerly ID');
+      if (idCol < 0) throw new Error('Could not add a Ledgerly ID column to this sheet.');
+    }
 
     var lastRow = sheet.getLastRow();
     if (lastRow < firstDataRow) return { revision: readConfigValue('revision', 0) || 0, deleted: [] };
@@ -853,10 +864,26 @@ function deleteTransactions(ids) {
     for (var i = 0; i < ids.length; i++) wanted[ids[i]] = true;
 
     var targets = [];
+    var found = {};
     for (var r = 0; r < values.length; r++) {
-      if (wanted[String(values[r][idCol] || '').trim()]) targets.push({ row: r + firstDataRow, values: values[r] });
+      var rowId = String(values[r][idCol] || '').trim();
+      if (wanted[rowId]) {
+        found[rowId] = true;
+        targets.push({ row: r + firstDataRow, values: values[r] });
+      }
     }
-    if (!targets.length) return { revision: readConfigValue('revision', 0) || 0, deleted: [] };
+
+    // Rows we were asked to delete but could not find. Reporting these matters:
+    // staying quiet makes a failed delete look like a success, and the row
+    // reappears at the next sync with nothing to explain it.
+    var missing = [];
+    for (var m = 0; m < ids.length; m++) {
+      if (!found[ids[m]]) missing.push(ids[m]);
+    }
+
+    if (!targets.length) {
+      return { revision: readConfigValue('revision', 0) || 0, deleted: [], missing: missing };
+    }
 
     var archiveOn = readConfigValue('appConfig', {});
     var shouldArchive = !archiveOn || !archiveOn.settings || archiveOn.settings.archiveOnDelete !== false;
@@ -869,7 +896,11 @@ function deleteTransactions(ids) {
     });
     for (var t = 0; t < targets.length; t++) sheet.deleteRow(targets[t].row);
 
-    return { revision: bumpRevision(), deleted: ids };
+    var removed = [];
+    for (var k = 0; k < ids.length; k++) {
+      if (found[ids[k]]) removed.push(ids[k]);
+    }
+    return { revision: bumpRevision(), deleted: removed, missing: missing };
   } finally {
     lock.releaseLock();
   }

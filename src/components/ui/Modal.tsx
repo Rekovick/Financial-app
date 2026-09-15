@@ -4,6 +4,31 @@ import { X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 /**
+ * Dialogs stack — the transaction editor opens a delete confirmation on top of
+ * itself — so the scroll lock is counted, not toggled. Each dialog saving and
+ * restoring `body.style.overflow` itself means the last one to unmount restores
+ * whatever it happened to capture, which for a stacked dialog is `hidden`, and
+ * the page can never be scrolled again.
+ */
+let scrollLocks = 0;
+let overflowBeforeLock = '';
+
+function lockScroll(): () => void {
+  if (scrollLocks === 0) {
+    overflowBeforeLock = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+  }
+  scrollLocks++;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    scrollLocks = Math.max(0, scrollLocks - 1);
+    if (scrollLocks === 0) document.body.style.overflow = overflowBeforeLock;
+  };
+}
+
+/**
  * One dialog component for both form factors: a bottom sheet on phones (thumb
  * reachable, swipe-to-dismiss affordance) and a centred panel on desktop.
  */
@@ -29,14 +54,24 @@ export function Modal({
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreFocus = useRef<Element | null>(null);
 
+  // Callers pass inline arrow functions, so these change identity on every
+  // render. Held in refs, the effect below can depend on `open` alone — with
+  // them in its dependency list it tore down and re-ran on every keystroke,
+  // pulling focus out of the field being typed into and back again, which on a
+  // phone closes and reopens the keyboard for each letter.
+  const onCloseRef = useRef(onClose);
+  const dismissableRef = useRef(dismissable);
+  onCloseRef.current = onClose;
+  dismissableRef.current = dismissable;
+
   useEffect(() => {
     if (!open) return;
     restoreFocus.current = document.activeElement;
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && dismissable) {
+      if (e.key === 'Escape' && dismissableRef.current) {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
       }
       if (e.key !== 'Tab') return;
       // Keep focus inside the dialog.
@@ -56,8 +91,7 @@ export function Modal({
     };
 
     document.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const releaseScroll = lockScroll();
 
     // Focus the first meaningful control, not the close button.
     const t = setTimeout(() => {
@@ -68,11 +102,11 @@ export function Modal({
 
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
+      releaseScroll();
       clearTimeout(t);
       (restoreFocus.current as HTMLElement | null)?.focus?.();
     };
-  }, [open, onClose, dismissable]);
+  }, [open]);
 
   if (!open) return null;
 
