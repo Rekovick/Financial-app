@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Sparkles, Trash2, TriangleAlert } from 'lucide-react';
+import { Plus, Sparkles, Target, Trash2, TriangleAlert } from 'lucide-react';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge, EmptyState, ProgressBar } from '@/components/ui/Misc';
 import { Modal, ConfirmDialog } from '@/components/ui/Modal';
 import { Input, Label, Switch } from '@/components/ui/Field';
 import { CategoryPicker } from '@/components/CategoryPicker';
+import { BudgetPlanner } from '@/components/BudgetPlanner';
 import { Stat } from '@/components/Stat';
 import { useStore } from '@/lib/store';
 import { useUI } from '@/lib/ui';
@@ -26,6 +27,7 @@ export function Budgets() {
   const [editing, setEditing] = useState<Budget | null>(null);
   const [creating, setCreating] = useState(false);
   const [removing, setRemoving] = useState<Budget | null>(null);
+  const [planning, setPlanning] = useState(false);
 
   const statuses = useMemo(
     () => budgetStatus(transactions, config.budgets, config.categories, range),
@@ -114,12 +116,10 @@ export function Budgets() {
           subtitle={periodLabel(range, s.locale, s.monthStartDay)}
           action={
             <div className="flex gap-2">
-              {config.budgets.length === 0 && (
-                <Button size="sm" variant="secondary" onClick={() => void suggest()}>
-                  <Sparkles className="h-4 w-4" />
-                  Suggest
-                </Button>
-              )}
+              <Button size="sm" variant="secondary" onClick={() => setPlanning(true)}>
+                <Target className="h-4 w-4" />
+                Plan a month
+              </Button>
               <Button size="sm" variant="primary" onClick={() => setCreating(true)}>
                 <Plus className="h-4 w-4" />
                 New
@@ -191,13 +191,17 @@ export function Budgets() {
               title="No budgets yet"
               body="Budgets turn a pile of transactions into a simple question: are we on track? Start with the two or three categories that tend to surprise you."
               action={
-                <div className="flex gap-2">
-                  <Button variant="primary" onClick={() => setCreating(true)}>
-                    Create one
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Button variant="primary" onClick={() => setPlanning(true)}>
+                    <Target className="h-4 w-4" />
+                    Plan from a target
                   </Button>
                   <Button variant="secondary" onClick={() => void suggest()}>
                     <Sparkles className="h-4 w-4" />
                     Suggest from history
+                  </Button>
+                  <Button variant="ghost" onClick={() => setCreating(true)}>
+                    Create one
                   </Button>
                 </div>
               }
@@ -212,6 +216,8 @@ export function Budgets() {
           ({percent(pace, s.locale)} of the period has passed).
         </p>
       )}
+
+      <BudgetPlanner open={planning} onClose={() => setPlanning(false)} />
 
       <BudgetEditor
         open={creating || editing != null}

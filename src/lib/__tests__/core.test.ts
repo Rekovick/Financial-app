@@ -43,6 +43,7 @@ import { parseCSV, toCSV, guessMapping, rowsToTransactions, findDuplicates } fro
 import { DEFAULT_CATEGORIES, DEFAULT_CONFIG, DEFAULT_SETTINGS } from '../defaults.ts';
 import { configFromSheet, newCategories } from '../adopt.ts';
 import { replayQueue } from '../store.ts';
+import { completePeriods, niceRound, periodsAvailable, planBudgets } from '../budgetPlanner.ts';
 import type { Transaction } from '../types.ts';
 
 const S = { ...DEFAULT_SETTINGS };
@@ -610,4 +611,140 @@ test('a sync in flight cannot undo an edit or delete made during it', () => {
 
   // Nothing queued: the sheet is the truth, untouched.
   assert.equal(replayQueue(fromSheet, []), fromSheet);
+});
+
+/* ----------------------------- budget planner ----------------------------- */
+
+/** Three complete months (June–August 2026) of a realistic household. */
+function plannerLedger(): Transaction[] {
+  const rows: Transaction[] = [];
+  const months = ['2026-06', '2026-07', '2026-08'];
+  months.forEach((m, i) => {
+    // Fixed: identical every month.
+    rows.push(txn({ date: `${m}-01`, description: 'GREENVIEW RENT', amount: 2450, category: 'Rent' }));
+    rows.push(txn({ date: `${m}-12`, description: 'ETISALAT BILL', amount: 300, category: 'Telecom & Bills' }));
+    // Flexible: genuinely variable.
+    rows.push(txn({ date: `${m}-05`, description: 'TALABAT', amount: [900, 1300, 1100][i], category: 'Dining' }));
+    rows.push(txn({ date: `${m}-20`, description: 'AMAZON', amount: [400, 800, 600][i], category: 'Shopping' }));
+  });
+  // A September (current, partial) month that must be ignored.
+  rows.push(txn({ date: '2026-09-03', description: 'TALABAT', amount: 5000, category: 'Dining' }));
+  // Transfers never get a spending budget.
+  rows.push(txn({ date: '2026-07-10', description: 'TELDA', amount: 999, category: 'Transfer' }));
+  return rows;
+}
+
+const PLAN = { categories: DEFAULT_CATEGORIES, asOf: '2026-09-15', monthStartDay: 1, months: 3 };
+
+test('planner learns only from complete months', () => {
+  const periods = completePeriods('2026-09-15', 1, 3);
+  assert.deepEqual(periods.map((p) => p.from), ['2026-06-01', '2026-07-01', '2026-08-01']);
+  assert.equal(periods[2].to, '2026-08-31');
+
+  const plan = planBudgets({ ...PLAN, transactions: plannerLedger(), target: 99999 });
+  const dining = plan.rows.find((r) => r.name === 'Dining')!;
+  // (900 + 1300 + 1100) / 3 — the 5,000 from the partial September is ignored.
+  assert.equal(dining.average, 1100);
+  assert.ok(!plan.rows.some((r) => r.name === 'Transfer'), 'transfers are not budgeted');
+});
+
+test('planner never cuts a fixed cost to hit the target', () => {
+  // Typical month: 2450 + 300 + 1100 + 600 = 4450. Ask for 3850 — 600 less.
+  const plan = planBudgets({ ...PLAN, transactions: plannerLedger(), target: 3850 });
+  const get = (n: string) => plan.rows.find((r) => r.name === n)!;
+
+  assert.equal(get('Rent').fixed, true);
+  assert.equal(get('Rent').fixedReason, 'steady');
+  assert.equal(get('Rent').suggested, 2450, 'rent is held, not cut');
+  assert.equal(get('Telecom & Bills').suggested, 300);
+
+  // The whole 600 comes out of the flexible categories, in proportion.
+  assert.equal(get('Dining').fixed, false);
+  assert.equal(get('Shopping').fixed, false);
+  assert.ok(get('Dining').suggested < 1100);
+  assert.ok(get('Shopping').suggested < 600);
+  assert.ok(get('Dining').suggested > get('Shopping').suggested, 'the bigger category keeps more');
+
+  assert.equal(plan.total, 3850, 'rounding drift is absorbed so the plan hits the target exactly');
+  assert.equal(plan.feasible, true);
+});
+
+test('planner says so when fixed costs alone exceed the target', () => {
+  const plan = planBudgets({ ...PLAN, transactions: plannerLedger(), target: 2000 });
+  assert.equal(plan.feasible, false);
+  assert.equal(plan.flexibleBudget, 0);
+  // It still never pretends rent can drop.
+  assert.equal(plan.rows.find((r) => r.name === 'Rent')!.suggested, 2450);
+});
+
+test('planner respects a manual fixed/flexible override', () => {
+  const plan = planBudgets({
+    ...PLAN,
+    transactions: plannerLedger(),
+    target: 4000,
+    overrides: { Dining: true, Rent: false },
+  });
+  const get = (n: string) => plan.rows.find((r) => r.name === n)!;
+  assert.equal(get('Dining').fixed, true);
+  assert.equal(get('Dining').suggested, 1100);
+  assert.equal(get('Rent').fixed, false);
+  assert.ok(get('Rent').suggested < 2450, 'once unlocked, rent takes its share of the cut');
+  assert.equal(plan.total, 4000);
+});
+
+test('a raised target grows the flexible categories, never the fixed ones', () => {
+  const plan = planBudgets({ ...PLAN, transactions: plannerLedger(), target: 5450 });
+  const get = (n: string) => plan.rows.find((r) => r.name === n)!;
+  assert.equal(get('Rent').suggested, 2450);
+  assert.ok(get('Dining').suggested > 1100);
+  assert.ok(plan.cut < 0, 'a negative cut means flexible spending may grow');
+  assert.equal(plan.total, 5450);
+});
+
+test('a category missing in some months is never treated as fixed', () => {
+  const rows = plannerLedger();
+  // Shows up once, same amount — "steady" when present, but not monthly.
+  rows.push(txn({ date: '2026-07-14', description: 'IKEA', amount: 500, category: 'Home' }));
+  const plan = planBudgets({ ...PLAN, transactions: rows, target: 5000 });
+  const home = plan.rows.find((r) => r.name === 'Home')!;
+  assert.equal(home.fixed, false);
+  assert.equal(home.monthsSeen, 1);
+  assert.ok(Math.abs(home.average - 500 / 3) < 1e-9, 'quiet months count as zero in the average');
+});
+
+test('history counts only fully recorded months', () => {
+  const rows = [txn({ date: '2026-07-20', amount: 10 }), txn({ date: '2026-08-28', amount: 10 })];
+  // July is only partly recorded (data starts on the 20th), so only August counts.
+  assert.equal(periodsAvailable(rows, '2026-09-15', 1), 1);
+  assert.equal(periodsAvailable([], '2026-09-15', 1), 0);
+});
+
+test('planner rounding is sensible at every scale', () => {
+  assert.equal(niceRound(0), 0);
+  assert.equal(niceRound(87), 90);
+  assert.equal(niceRound(612), 600);
+  assert.equal(niceRound(2463), 2450);
+  assert.equal(niceRound(13870), 13900);
+});
+
+test('a bill with small usage swings still counts as fixed; dining does not', () => {
+  const rows = plannerLedger();
+  // A utility bill moving a few percent month to month.
+  ['2026-06', '2026-07', '2026-08'].forEach((m, i) =>
+    rows.push(txn({ date: `${m}-18`, description: 'ELECTRICITY', amount: [480, 500, 515][i], category: 'Utilities' })),
+  );
+  const plan = planBudgets({ ...PLAN, transactions: rows, target: 5000 });
+  assert.equal(plan.rows.find((r) => r.name === 'Utilities')!.fixed, true);
+  assert.equal(plan.rows.find((r) => r.name === 'Dining')!.fixed, false);
+});
+
+test('a month that stops recording early does not count as history', () => {
+  // A snapshot running Sept 1–11, viewed in October: September is over, but
+  // only a third of it was ever recorded.
+  const snapshot = [txn({ date: '2026-09-01', amount: 10 }), txn({ date: '2026-09-11', amount: 10 })];
+  assert.equal(periodsAvailable(snapshot, '2026-10-01', 1), 0);
+
+  // The same month recorded to its last week does count.
+  const full = [...snapshot, txn({ date: '2026-09-27', amount: 10 })];
+  assert.equal(periodsAvailable(full, '2026-10-01', 1), 1);
 });
