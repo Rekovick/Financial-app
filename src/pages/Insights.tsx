@@ -40,7 +40,10 @@ export function Insights() {
   const sums = useMemo(() => totals(transactions, range), [transactions, range]);
 
   const cats = useMemo(
-    () => byCategory(transactions, config.categories, range, { limit: 8, direction }),
+    // Insights is the full picture: every category, never folded into "Other".
+    // Each one is named and valued in the list under the ring, so a hue that
+    // repeats past the palette's eight is never the only way to tell them apart.
+    () => byCategory(transactions, config.categories, range, { limit: Infinity, direction }),
     [transactions, config.categories, range, direction],
   );
 

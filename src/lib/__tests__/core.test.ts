@@ -748,3 +748,11 @@ test('a month that stops recording early does not count as history', () => {
   const full = [...snapshot, txn({ date: '2026-09-27', amount: 10 })];
   assert.equal(periodsAvailable(full, '2026-10-01', 1), 1);
 });
+
+test('with no limit, every category is listed and nothing is folded', () => {
+  const rows = Array.from({ length: 12 }, (_, i) => txn({ amount: 100 - i, category: `Cat${i}` }));
+  const slices = byCategory(rows, DEFAULT_CATEGORIES, null, { limit: Infinity });
+  assert.equal(slices.length, 12);
+  assert.ok(!slices.some((s) => s.name === 'Other'));
+  assert.equal(slices.reduce((s, c) => s + c.value, 0), rows.reduce((s, t) => s + t.amount, 0));
+});
